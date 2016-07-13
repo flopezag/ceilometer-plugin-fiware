@@ -26,7 +26,7 @@ from ceilometer.agent import plugin_base
 from ceilometer import sample
 from neutronclient.v2_0 import client as clientN
 from netaddr import *
-
+from ceilometer.region import OSVersionComponent
 
 LOG = log.getLogger(__name__)
 
@@ -128,6 +128,19 @@ class RegionPollster(_Base):
         metaD["ram_allocation_ratio"] = (cfg.CONF.region.ram_allocation_ratio if cfg.CONF.region.ram_allocation_ratio else None)
         metaD["cpu_allocation_ratio"] = (cfg.CONF.region.cpu_allocation_ratio if cfg.CONF.region.cpu_allocation_ratio else None)
 
+        # store components versions as metadata
+        manager = OSVersionComponent.OpenStackComponentVersionManager()
+        c_versions = manager.get_all_components_version()
+        for c in c_versions:
+            if c['isInstalled']:
+                name = c['component'] + "_version"
+                version = c['attributes']['version']
+                metaD[name] = version
+            else:
+                LOG.debug("Component not intalled: %s " % (c))
+
+        LOG.debug("Publish region metadata: %s " % (metaD))
+
         # build samples
         regionArray.append({'name': 'region.pool_ip', 'unit': '#', 'value': (pool_size if pool_size else 0)})
         regionArray.append({'name': 'region.allocated_ip', 'unit': '#', 'value': (alloc_ip if alloc_ip else 0)})
@@ -135,7 +148,7 @@ class RegionPollster(_Base):
 
         # loop over the region Object
         for regionInfo in regionArray:
-            yield sample.Sample(
+            my_sample = sample.Sample(
                 name=regionInfo['name'],
                 type="gauge",
                 unit=regionInfo['unit'],
@@ -146,3 +159,5 @@ class RegionPollster(_Base):
                 timestamp=timeutils.isotime(),
                 resource_metadata=metaD
             )
+            LOG.debug("Publish sample: %s" % (my_sample))
+            yield my_sample
