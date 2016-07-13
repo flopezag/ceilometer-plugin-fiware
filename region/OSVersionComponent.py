@@ -16,6 +16,7 @@ class OpenStackComponentVersionManager():
 	NEUTRON = "neutron"
 	GLANCE = "glance"
 	KEYSTONE = "keystone"
+	CEILOMETER = "ceilometer"
 
 
 	#internal names to gather the OpenStack version (usually they are the same, but with this approach, we can decouple the internal name)
@@ -24,6 +25,7 @@ class OpenStackComponentVersionManager():
 	_NEUTRON_INT = "neutron"
 	_GLANCE_INT = "glance"
 	_KEYSTONE_INT = "keystone"
+	_CEILOMETER_INT = "ceilometer"
 
 
 	##common method to know the version
@@ -72,12 +74,16 @@ class OpenStackComponentVersionManager():
 	def get_component_version_keystone(self):
 		return self._get_component_version_common(self._KEYSTONE_INT)
 
+	##specific method to obtain the keystone version. We have decouple the name and the name of the method, in order to be sure that if something change we could manage in a easy way.
+	def get_component_version_ceilometer(self):
+		return self._get_component_version_common(self._CEILOMETER_INT)
+
 	##Method to obtain the component version
 	##attibutes: 
 	##**component: name of the component that we know the version. Domanin: CalendarSynchronizer.NOVA, CalendarSynchronizer.CINDER.....
 
 	def get_list_valid_components(self):
-		return [self.NOVA, self.CINDER, self.NEUTRON, self.GLANCE, self.KEYSTONE]
+		return [self.NOVA, self.CINDER, self.NEUTRON, self.GLANCE, self.KEYSTONE, self.CEILOMETER]
 
 	def get_component_version(self, component):
 		#validate if the name of the component is valid, if not we will raise an exception. 
