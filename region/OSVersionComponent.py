@@ -79,7 +79,7 @@ class OpenStackComponentVersionManager():
 		return self._get_component_version_common(self._CEILOMETER_INT)
 
 	##Method to obtain the component version
-	##attibutes: 
+	##attributes: 
 	##**component: name of the component that we know the version. Domanin: CalendarSynchronizer.NOVA, CalendarSynchronizer.CINDER.....
 
 	def get_list_valid_components(self):
@@ -104,16 +104,16 @@ class OpenStackComponentVersionManager():
 		version_value = func()
 
 		#initialization of the component detail
-		component_attibute = {"component": component, "isInstalled": False}
+		component_attribute = {"component": component, "isInstalled": False}
 		if version_value is not None:
-			component_attibute["isInstalled"] = True
-			attibutes = {'attibutes':{'version': version_value}}
-			component_attibute.update(attibutes)
-		return component_attibute
+			component_attribute["isInstalled"] = True
+			attributes = {'attributes':{'version': version_value}}
+			component_attribute.update(attributes)
+		return component_attribute
 
 
 	##Method to obtain a list of components version and add the element into the array.
-	##attibutes: 
+	##attributes: 
 	##**component_list: list of name of the component that we know the version. Domanin of values: CalendarSynchronizer.NOVA, CalendarSynchronizer.CINDER.....
 	def get_components_version(self, component_list):
 		components_array = []
