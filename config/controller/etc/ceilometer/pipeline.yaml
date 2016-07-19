@@ -1,0 +1,32 @@
+---
+sources:
+    - name: meter_source
+      interval: 600
+      meters:
+          - "region*"
+          - "image"
+          - "instance"
+          - "vcpus"
+          - "cpu*"
+          - "memory*"
+          - "disk.usage"
+          - "disk.capacity"
+          - "compute.node.cpu.percent"
+          - "compute.node.cpu.now"
+          - "compute.node.cpu.tot"
+          - "compute.node.cpu.max"
+          - "compute.node.ram.now"
+          - "compute.node.ram.tot"
+          - "compute.node.ram.max"
+          - "compute.node.disk.now"
+          - "compute.node.disk.tot"
+          - "compute.node.disk.max"
+          - "processes.process_pid_count"
+      sinks:
+          - meter_sink
+sinks:
+    - name: meter_sink
+      transformers:
+      publishers:
+          - notifier://
+          - monasca://http://127.0.0.1:8070/v2.0

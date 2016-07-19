@@ -1,0 +1,94 @@
+metrics:
+    - region.allocated_ip
+    - region.pool_ip
+    - region.used_ip
+    - image
+    - instance
+    - vcpus
+    - cpu_util
+    - memory_util
+    - memory.usage
+    - memory
+    - disk.usage
+    - disk.capacity
+    - compute.node.cpu.percent
+    - compute.node.cpu.now
+    - compute.node.cpu.tot
+    - compute.node.cpu.max
+    - compute.node.ram.now
+    - compute.node.ram.tot
+    - compute.node.ram.max
+    - compute.node.disk.now
+    - compute.node.disk.tot
+    - compute.node.disk.max
+    - processes.process_pid_count
+dimensions:
+    - resource_id
+    - project_id
+    - user_id
+    - region
+    - type
+    - unit
+    - source
+metadata:
+    common:
+        - event_type
+    region.pool_ip:
+        - location
+        - latitude
+        - longitude
+        - ram_allocation_ratio
+        - cpu_allocation_ratio
+        - ceilometer_version
+        - keystone_version
+        - neutron_version
+        - cinder_version
+        - nova_version
+        - glance_version
+    image:
+        - size
+        - status
+        - name
+        - properties
+    instance:
+        - name
+        - host
+        - status
+        - instance_type
+        - image_ref
+        - properties
+    cpu_util:
+        - name
+        - host
+        - status
+        - instance_type
+        - image_ref
+        - properties
+    memory.usage:
+        - name
+        - host
+        - status
+        - instance_type
+        - image_ref
+        - properties
+    memory:
+        - name
+        - host
+        - status
+        - instance_type
+        - image_ref
+        - properties
+    disk.usage:
+        - name
+        - host
+        - status
+        - instance_type
+        - image_ref
+        - properties
+    disk.capacity:
+        - name
+        - host
+        - status
+        - instance_type
+        - image_ref
+        - properties
