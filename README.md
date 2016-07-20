@@ -35,7 +35,7 @@ The installation and configuration procedure involves both *Central agent pollst
 *Compute agent pollsters* at every compute node. This repository contains all the pollsters and files that IOs would
 need to customize the default Ceilometer installation.
 
-### Central agent pollsters
+### Controller(s)
 
 #### Pollster for region
 
@@ -55,7 +55,7 @@ Please follow these steps:
 
    Pay attention to the `netlist` attribute: the names of external networks in your OpenStack installation.
 
-2. Locate the installation directory of Ceilometer package (usually, `pip` command would show such information):
+2. Locate the installation directory of Ceilometer package (usually, `pip` command shows such information):
 
    ```
    # pip show ceilometer
@@ -106,7 +106,7 @@ in entry points:
    ```
 
 
-### Compute agent pollsters
+### Compute nodes
 
 #### Pollster for hosts
 
@@ -158,16 +158,29 @@ __NOT NEEDED IF YOU HAVE A CEILOMETER FOR OPENSTACK KILO__
 4. Replace file `/usr/lib/python2.7/dist-packages/ceilometer/compute/pollsters/disk.py` with that at location
    [compute_pollster/disk.py](/compute_pollster/disk.py) in this repository
 
-5. Edit entry points file and ensure these entries are found at the `[ceilometer.poll.compute]` section:
+5. Edit entry points file and ensure these entries are found at their respective sections:
 
    ```
+   [ceilometer.notification]
    memory = ceilometer.compute.notifications.instance:Memory
+   ```
+   ```
+   [ceilometer.poll.compute]
    memory.usage = ceilometer.compute.pollsters.memory:MemoryUsagePollster
    disk.capacity = ceilometer.compute.pollsters.disk:CapacityPollster
    disk.usage = ceilometer.compute.pollsters.disk:PhysicalPollster
    ```
 
-6. Restart Compute Agent.
+#### Configuration files
+
+1. Copy (or merge) the following configuration files from [config/compute](/config/compute/etc/ceilometer)
+   directory into `/etc/ceilometer`:
+
+   ```
+   pipeline.yaml
+   ```
+
+2. Restart Compute Agent.
 
    ```
    # service ceilometer-agent-compute restart
@@ -219,11 +232,12 @@ send samples to Monasca:
    monasca = ceilometer.storage.impl_monasca_filtered:Connection
    ```
 
-4. Copy (or merge) the following configuration files from Monasca-Ceilometer repository into `/etc/ceilometer`:
+4. Copy (or merge) the following configuration files from [config/controller](/config/controller/etc/ceilometer)
+   directory into `/etc/ceilometer`:
 
    ```
-   monasca-ceilometer/etc/ceilometer/pipeline.yaml
-   monasca-ceilometer/etc/ceilometer/monasca_field_definitions.yaml
+   pipeline.yaml
+   monasca_field_definitions.yaml
    ```
 
    Please ensure elements in __meter_source__ include the subset of Ceilometer metrics required by FIWARE Monitoring
