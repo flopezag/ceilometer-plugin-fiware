@@ -65,17 +65,19 @@ Please follow these steps:
    Location: /usr/lib/python2.7/dist-packages
    ```
 
+   In this documentation we will refer to such location as `$PYTHON_SITE_PKG`.
+
 3. Copy [region](/region) directory structure from this repository into Ceilometer package location (by default, at
-   `/usr/lib/python2.7/dist-packages/ceilometer`). After that, `RegionPollster` class should be available:
+   `$PYTHON_SITE_PKG/ceilometer`). After that, `RegionPollster` class should be available:
 
    ```
    # python -c 'from ceilometer.region import region; print region.RegionPollster().__class__'
    <class 'ceilometer.region.region.RegionPollster'>
    ```
 
-4. Locate the entry points file for Ceilometer (which depends on the version: for 2015.1.1, should be located at path
-   `/usr/lib/python2.7/dist-packages/ceilometer-2015.1.1.egg-info/entry_points.txt`) and please add the new pollster at
-   the `[ceilometer.poll.central]` section:
+4. Locate the entry points file for Ceilometer (which depends on the version: for 2015.1.1, should be located at
+   path `$PYTHON_SITE_PKG/ceilometer-2015.1.1.egg-info/entry_points.txt`) and please add the new pollster at the
+   `[ceilometer.poll.central]` section:
 
    ```
    region = ceilometer.region.region:RegionPollster
@@ -146,16 +148,16 @@ in entry points:
 
 __NOT NEEDED IF YOU HAVE A CEILOMETER FOR OPENSTACK KILO__
 
-1. Replace file `/usr/lib/python2.7/dist-packages/ceilometer/compute/virt/inspector.py` with that at location
+1. Replace file `$PYTHON_SITE_PKG/ceilometer/compute/virt/inspector.py` with that at location
    [virt/inspector.py](/virt/inspector.py) in this repository
 
-2. Replace file `/usr/lib/python2.7/dist-packages/ceilometer/compute/virt/libvirt/inspector.py` with that at location
+2. Replace file `$PYTHON_SITE_PKG/ceilometer/compute/virt/libvirt/inspector.py` with that at location
    [virt/libvirt/inspector.py](/virt/libvirt/inspector.py) in this repository
 
-3. Replace file `/usr/lib/python2.7/dist-packages/ceilometer/compute/pollsters/memory.py` with that at location
+3. Replace file `$PYTHON_SITE_PKG/ceilometer/compute/pollsters/memory.py` with that at location
    [compute_pollster/memory.py](/compute_pollster/memory.py) in this repository
 
-4. Replace file `/usr/lib/python2.7/dist-packages/ceilometer/compute/pollsters/disk.py` with that at location
+4. Replace file `$PYTHON_SITE_PKG/ceilometer/compute/pollsters/disk.py` with that at location
    [compute_pollster/disk.py](/compute_pollster/disk.py) in this repository
 
 5. Edit entry points file and ensure these entries are found at their respective sections:
@@ -200,24 +202,24 @@ send samples to Monasca:
    # pip install python-monascaclient==1.0.27
    ```
 
-2. Copy the following files from *Ceilosca* component (included in the [latest release][monasca_ceilometer_releases]
-   of [Monasca-Ceilometer][monasca_ceilometer]) into the Ceilometer package location:
+2. Copy the following files from [Ceilosca][monasca_ceilometer_files] component (included in the latest release of
+   [Monasca-Ceilometer][monasca_ceilometer]) into the Ceilometer package location `$PYTHON_SITE_PKG/ceilometer`:
 
    ```
-   monasca-ceilometer/ceilosca/ceilometer/monasca_client.py
-   monasca-ceilometer/ceilosca/ceilometer/storage/impl_monasca.py
-   monasca-ceilometer/ceilosca/ceilometer/storage/impl_monasca_filtered.py
-   monasca-ceilometer/ceilosca/ceilometer/publisher/monasca_data_filter.py
-   monasca-ceilometer/ceilosca/ceilometer/publisher/monasca_metric_filter.py
-   monasca-ceilometer/ceilosca/ceilometer/publisher/monclient.py
+   monasca_client.py
+   storage/impl_monasca.py
+   storage/impl_monasca_filtered.py
+   publisher/monasca_data_filter.py
+   publisher/monasca_metric_filter.py
+   publisher/monclient.py
    ```
 
-   Additionally, please create a text file at `/usr/lib/python2.7/dist-packages/ceilometer-2015.1.*.egg-info` to record
-   the exact version of Ceilosca being manually installed. For instance, when installing version "2015.1-FIWARE-5.3.3":
+   Additionally, please create a text file at `$PYTHON_SITE_PKG/ceilometer-2015.1.*.egg-info` to record the exact
+   version of Ceilosca being manually installed. For instance, when installing version "2015.1-FIWARE-5.3.3":
 
    ```
    # VERSION=2015.1-FIWARE-5.3.3
-   # echo version=$VERSION > /usr/lib/python2.7/dist-packages/ceilometer-2015.1.*.egg-info/ceilosca.txt
+   # echo version=$VERSION > $PYTHON_SITE_PKG/ceilometer-2015.1.*.egg-info/ceilosca.txt
    ```
 
 3. Edit the entry points file to add the following entries:
@@ -249,14 +251,14 @@ send samples to Monasca:
          transformers:
          publishers:
              - notifier://
-             - monasca://http://MONASCA_API:8070/v2.0
+             - monasca://http://MONASCA_IP:8070/v2.0
    ```
 
 5. Modify `/etc/ceilometer/ceilometer.conf` to configure a new meter storage driver for Ceilometer (*substitute with the
    endpoint of Master Node*):
 
    ```
-   metering_connection = monasca://http://MONASCA_API:8070/v2.0
+   metering_connection = monasca://http://MONASCA_IP:8070/v2.0
    ```
 
    Please make sure the user specified under `[service_credentials]` section of the same file has __monasca_user__
@@ -298,6 +300,7 @@ installed in all the controllers:
    (monasca)# pip install --upgrade setuptools
    (monasca)# pip install --upgrade pip
    (monasca)# pip install pbr==1.10.0
+   (monasca)# pip install positional==1.1.0
    ```
 
 3. Locate the [latest release][monasca_agent_releases] of Monasca Agent component and use `pip` tool to install it. For
@@ -322,7 +325,7 @@ installed in all the controllers:
      --password=THE_PASSWORD \
      --project_name=service \
      --keystone_url=http://cloud.lab.fiware.org:4731/v3 \
-     --monasca_url=http://MONASCA_API:8070/v2.0 \
+     --monasca_url=http://MONASCA_IP:8070/v2.0 \
      --dimensions=region:YOUR_REGION
    ```
 
@@ -493,9 +496,9 @@ https://github.com/telefonicaid/monasca-agent/releases
 https://github.com/telefonicaid/monasca-ceilometer/tree/fiware
 "Python plugin and storage driver for Ceilometer to send samples to Monasca"
 
-[monasca_ceilometer_releases]:
-https://github.com/telefonicaid/monasca-ceilometer/releases
-"Releases of Python plugin and storage driver for Ceilometer to send samples to Monasca"
+[monasca_ceilometer_files]:
+https://github.com/telefonicaid/monasca-ceilometer/tree/fiware/ceilosca/ceilometer
+"Python plugin and storage driver for Ceilometer to send samples to Monasca"
 
 [cosmos]:
 https://github.com/Fiware/context.Cosmos/blob/master/README.md

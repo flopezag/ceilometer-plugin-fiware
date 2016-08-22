@@ -1,5 +1,5 @@
 #!/bin/sh
-# -*- coding: utf-8; version: 1.1.0 -*-
+# -*- coding: utf-8; version: 5.4.1 -*-
 #
 # Copyright 2016 Telefónica I+D
 # All Rights Reserved.
@@ -48,14 +48,16 @@
 OPTS="v(verbose)r(region):p(poll-threshold):m(measure-time):k(ssh-key):"
 OPTS="${OPTS}h(help)V(version)"
 PROG=$(basename $0)
+RELEASE=$(awk '/-\*-/ {print "v" $(NF-1) "\n"}' $0);
 
 # Files
-TEMP_FILE=/tmp/$PROG
+TEMP_FILE=/tmp/${PROG%.sh}
 NOVA_CONF=/etc/nova/nova.conf
 PIPELINE_CONF=/etc/ceilometer/pipeline.yaml
+CEILOSCA_CONF=/etc/ceilometer/monasca_field_definitions.yaml
 MONASCA_AGENT_CONF=/etc/monasca/agent/agent.yaml
-CENTRAL_AGENT_LOG=/var/log/ceilometer/ceilometer-agent-central.log
-COMPUTE_AGENT_LOG=/var/log/ceilometer/ceilometer-agent-compute.log
+CENTRAL_AGENT_LOG=/var/log/ceilometer/*central.log  # may or not include prefix
+COMPUTE_AGENT_LOG=/var/log/ceilometer/*compute.log  # may or not include prefix
 
 # Common definitions
 MONASCA_URL=
@@ -63,7 +65,10 @@ MONASCA_USERNAME=
 MONASCA_PASSWORD=
 MONASCA_AGENT_HOME=
 CEILOMETER_PKG=
-PYTHON_DIST_PKG=
+PYTHON_SITE_PKG=
+AUTH_TOKEN=
+USER_ROLES=
+SSH_CMD=
 alias trim='tr -d \ '
 
 # Command line options defaults
@@ -86,8 +91,7 @@ case $OPT in
 'm')	MEASURE_TIME=$OPTARG;;
 'k')	SSH_KEY=$OPTARG;;
 'h')	OPTERR="$OPTHLP";;
-'V')	OPTERR=$(awk '/-\*-/ {print "v" $(NF-1) "\n"}' $0);
-	printf "$OPTERR\n" 1>&2; exit 1;;
+'V')	OPTERR="$RELEASE"; printf "$OPTERR\n" 1>&2; exit 1;;
 '?')	OPTERR="Unknown option -$OPTARG";;
 ':')	OPTERR="Missing value for option -$OPTARG";;
 '-')	OPTLONG="${OPTARG%=*}";
@@ -125,11 +129,11 @@ COUNT=$(env | egrep 'OS_(AUTH_URL|USERNAME|PASSWORD|TENANT_NAME)' | wc -l)
 
 # Common functions
 check_ssh() {
-	SSH=ssh
+	SSH_CMD=ssh
 	status=0
 	hosts="$*"
 	for name in $hosts; do
-		if ! $SSH $name "ls" >/dev/null 2>&1; then
+		if ! $SSH_CMD $name "ls" >/dev/null 2>&1; then
 			status=1
 			break
 		fi
@@ -138,35 +142,49 @@ check_ssh() {
 		ssh_key_files="${SSH_KEY:-~/.ssh/fuel_id_rsa ~/.ssh/id_rsa}"
 		for name in $hosts; do
 			for file in $ssh_key_files; do
-				SSH="ssh -i $file"
-				if $SSH $name "ls" >/dev/null 2>&1; then
+				SSH_CMD="ssh -i $file"
+				if $SSH_CMD $name "ls" >/dev/null 2>&1; then
 					status=0
 					break
 				fi
 			done
 		done
 	fi
-	[ $status -eq 0 ] || unset SSH
+	[ $status -eq 0 ] || unset SSH_CMD
 	return $status
 }
 
+check_file_contains() {
+	file_embedded=$1
+	file_container=$2
+	count=$(cat $file_embedded | wc -l)
+	fdiff=$(diff -y $file_embedded $file_container | awk '
+		$0 !~ / *>.*/ { FLAG=1; }
+		$0 ~ /\|.---/ { print "---"; }
+		FLAG == 1 { print; }' \
+		| tail -n +$((count+1)) | grep -v '>')
+	test -z "$fdiff"
+	return $?
+}
+
 get_keystone_token() {
-	response=$(curl -s -S -X POST \
-		-H "Content-Type: application/json" \
-		-H "Accept: application/json" -d '{
-			"auth": {
-				"tenantName": "service",
-				"passwordCredentials": {
-					"username": "'$MONASCA_USERNAME'",
-					"password": "'$MONASCA_PASSWORD'"
+	curl="curl -s -S -X POST \
+		-H \"Content-Type: application/json\" \
+		-H \"Accept: application/json\" -d '{
+			\"auth\": {
+				\"tenantName\": \"service\",
+				\"passwordCredentials\": {
+					\"username\": \"$MONASCA_USERNAME\",
+					\"password\": \"$MONASCA_PASSWORD\"
 				}
 			}
-		}' https://cloud.lab.fiware.org:5000/v2.0/tokens \
-		| python -mjson.tool)
+		}' https://cloud.lab.fiware.org:5000/v2.0/tokens"
+	response=$(eval "$curl" | python -mjson.tool)
 	auth=$(echo "$response" | awk '/"token"/,/\}/ {print}')
 	role=$(echo "$response" | awk '/"roles"/,/\]/ {print}')
 	AUTH_TOKEN=$(echo "$auth" | awk -F\" '/"id"/ {print $4; exit}')
 	USER_ROLES=$(echo "$role" | awk -F\" '/"name"/ {print $4}')
+	[ -n "$VERBOSE" ] && printf "$curl\nResponse:\n$response\n" > $TEMP_FILE
 }
 
 printf_monasca_query() {
@@ -183,17 +201,21 @@ printf_ok() {
 	tput setaf 2; printf "$*\n"; tput sgr0
 }
 
-printf_warn() {
-	tput setaf 3; printf "$*\n"; tput sgr0
-}
-
 printf_fail() {
 	tput setaf 1; printf "$*\n"; tput sgr0
 }
 
+printf_warn() {
+	tput setaf 3; printf "$*\n"; tput sgr0
+}
+
+printf_info() {
+	tput setaf 6; printf "$*\n"; tput sgr0
+}
+
 printf_curl() {
 	msg="$1"
-	tput setaf 1; printf "$msg"; awk '{$1=$1; print}' $TEMP_FILE; tput sgr0
+	tput setaf 6; printf "$msg"; awk '{$1=$1; print}' $TEMP_FILE; tput sgr0
 }
 
 printf_measurements() {
@@ -205,7 +227,7 @@ printf_measurements() {
 		query="$measurements_query,$item"
 		result=$(printf_monasca_query "$query&$measurements_filter")
 		sample=$(echo "$result" | awk '/\.0,/ {print $NF}' | tail -1)
-		printf_warn "* Last measurement for ${item#*:}: $sample"
+		printf_info "* Last measurement for ${item#*:}: $sample"
 	done
 }
 
@@ -219,17 +241,13 @@ METRICS_FOR_VMS="\
 	instance:status \
 	instance:image_ref \
 	instance:instance_type \
+	vcpus \
 	cpu_util \
+	memory_util \
 	memory.usage \
 	memory \
 	disk.usage \
 	disk.capacity"
-
-METRICS_FOR_REGIONS="\
-	region.used_ip \
-	region.pool_ip \
-	region.allocated_ip \
-	region.sanity_status"
 
 METRICS_FOR_COMPUTE_NODES="\
 	compute.node.cpu.percent \
@@ -261,18 +279,38 @@ METRICS_FOR_HOST_SERVICES="\
 	glance-api \
 	glance-registry"
 
+METRICS_FOR_REGIONS="\
+	region.used_ip \
+	region.pool_ip \
+	region.allocated_ip \
+	region.sanity_status"
+
+METADATA_FOR_REGIONS="\
+	latitude \
+	longitude \
+	location \
+	cpu_allocation_ratio \
+	ram_allocation_ratio \
+	nova_version \
+	neutron_version \
+	cinder_version \
+	glance_version \
+	keystone_version \
+	ceilometer_version"
+
 # Timestamps
 NOW=$(date +%s)
 SOME_TIME_AGO=$((NOW - $MEASURE_TIME * 60))
 
-# Recent measurements period
-printf_warn "[Considering measurements within last $MEASURE_TIME minutes]"
+# Show general information
+printf_info "\nFIWARE Lab Monitoring System, release $RELEASE"
+printf_info "[Considering measurements within last $MEASURE_TIME minutes]\n"
 
 # Check Python interpreter
 printf "Check Python interpreter... "
 if [ -n "$VIRTUAL_ENV" ]; then
 	printf_fail "Python virtualenv $VIRTUAL_ENV should not be active"
-	exit 1
+	exit 2
 else
 	printf_ok "$(python -V 2>&1) at $(which python)"
 fi
@@ -282,13 +320,14 @@ printf "Check Monasca Agent installation... "
 for DIR in /opt/monasca /monasca/monasca_agent_env; do
 	if [ -d $DIR ]; then
 		MONASCA_AGENT_HOME=$DIR
-		INFO=$($MONASCA_AGENT_HOME/bin/pip show monasca-agent)
+		INFO=$($MONASCA_AGENT_HOME/bin/pip show monasca-agent 2>&1)
 		VERSION=$(echo "$INFO" | awk '/^Version:/ {print $2}')
 		break
 	fi
 done
 if [ -z "$MONASCA_AGENT_HOME" ]; then
 	printf_fail "Not found"
+	exit 2
 elif [ $(expr "$MONASCA_AGENT_HOME" : "^/opt/.*") -eq 0 ]; then
 	printf_warn "$VERSION at $MONASCA_AGENT_HOME (this path is deprecated)"
 else
@@ -375,14 +414,6 @@ else
 	printf_fail "Set 'password' value in $MONASCA_AGENT_CONF"
 fi
 
-# Check for monasca_user role
-printf "Check Monasca Agent credentials for 'monasca_user' role... "
-if get_keystone_token && expr "$USER_ROLES" : "monasca_user" >/dev/null; then
-	printf_ok "OK"
-else
-	printf_fail "User roles: $USER_ROLES"
-fi
-
 # Check Monasca Agent (polling frequency)
 printf "Check Monasca Agent polling frequency... "
 POLL_RATE=$(awk -F: '/^ *check_freq/ {print $2}' $MONASCA_AGENT_CONF | trim)
@@ -390,6 +421,18 @@ if [ -n "$POLL_RATE" -a $POLL_RATE -ge $POLL_THRESHOLD ]; then
 	printf_ok "$POLL_RATE seconds"
 else
 	printf_warn "$POLL_RATE seconds (consider a higher value)"
+fi
+
+# Check for monasca_user role
+printf "Check Monasca Agent credentials for 'monasca_user' role... "
+if get_keystone_token && expr "$USER_ROLES" : "monasca_user" >/dev/null; then
+	printf_ok "OK"
+elif [ -z "$AUTH_TOKEN" ]; then
+	printf_fail "Could not get auth token"
+	[ -n "$VERBOSE" ] && printf_curl
+else
+	printf_fail "User roles: $USER_ROLES"
+	[ -n "$VERBOSE" ] && printf_curl
 fi
 
 # Check Ceilometer polling frequency
@@ -403,18 +446,18 @@ fi
 
 # Check Ceilometer central agent logfile
 printf "Check Ceilometer central agent logfile... "
-if [ -r "$CENTRAL_AGENT_LOG" ]; then
-	printf_ok "$CENTRAL_AGENT_LOG"
+if [ -r $CENTRAL_AGENT_LOG ]; then
+	printf_ok $CENTRAL_AGENT_LOG
 else
 	printf_fail "Not found"
 fi
 
 # Check Ceilometer installation path and version
 printf "Check Ceilometer installation path and version... "
-PYTHON_DIST_PKG=$(python -c "import sys; \
-	print [dir for dir in sys.path if dir.endswith('dist-packages')][-1]")
-if [ -d "$PYTHON_DIST_PKG/ceilometer" ]; then
-	CEILOMETER_PKG="$PYTHON_DIST_PKG/ceilometer"
+PYTHON_SITE_PKG=$(python -c "import site; path = site.getsitepackages(); \
+	print [dir for dir in path if dir.endswith('packages')][-1]")
+if [ -d "$PYTHON_SITE_PKG/ceilometer" ]; then
+	CEILOMETER_PKG="$PYTHON_SITE_PKG/ceilometer"
 	VERSION=$(pip show ceilometer | awk '/^Version:/ {print $2}')
 	printf_ok "$VERSION at $CEILOMETER_PKG"
 else
@@ -423,7 +466,7 @@ fi
 
 # Check Ceilometer plugin for Monasca (Ceilosca)
 printf "Check Ceilometer plugin for Monasca (Ceilosca)... "
-FILE=$PYTHON_DIST_PKG/ceilometer-*.egg-info/ceilosca.txt
+FILE=$PYTHON_SITE_PKG/ceilometer-*.egg-info/ceilosca.txt
 VERSION=$(awk -F= '{print $2}' $FILE 2>/dev/null)
 if [ -n "$VERSION" ]; then
 	printf_ok "$VERSION"
@@ -473,7 +516,7 @@ fi
 
 # Check Ceilometer entry points at this node
 printf "Check Ceilometer entry points at this node... "
-FILE=$PYTHON_DIST_PKG/ceilometer-*.egg-info/entry_points.txt
+FILE=$PYTHON_SITE_PKG/ceilometer-*.egg-info/entry_points.txt
 POINTS="poll.central|RegionPollster \
 	publisher|MonascaPublisher \
 	metering.storage|monasca_filtered:Connection"
@@ -487,7 +530,82 @@ done
 if [ $ACTUAL -eq $EXPECTED ]; then
 	printf_ok "OK ($(echo $POINTS))"
 else
-	printf_fail "Could not find all entry points at $FILE"
+	printf_fail "Could not find all entry points at" $FILE
+fi
+
+# Check Ceilometer configuration at this node
+printf "Check Ceilometer configuration at this node... "
+TEMP_FILE_LIST=""
+TEMP_FILE_CONFIG=${TEMP_FILE}.cfg
+TEMP_FILE_OUTPUT=${TEMP_FILE}.out
+TEMP_FILE_NAME=${TEMP_FILE}_01_meter_sink
+TEMP_FILE_LIST="$TEMP_FILE_LIST $TEMP_FILE_NAME"; cat > $TEMP_FILE_NAME <<-"EOF"
+	meters:
+		- "region*"
+		- "image"
+		- "instance"
+		- "vcpus"
+		- "cpu*"
+		- "memory*"
+		- "disk.usage"
+		- "disk.capacity"
+		- "compute.node.cpu.percent"
+		- "compute.node.cpu.now"
+		- "compute.node.cpu.tot"
+		- "compute.node.cpu.max"
+		- "compute.node.ram.now"
+		- "compute.node.ram.tot"
+		- "compute.node.ram.max"
+		- "compute.node.disk.now"
+		- "compute.node.disk.tot"
+		- "compute.node.disk.max"
+		- "processes.process_pid_count"
+	sinks:
+		- meter_sink
+EOF
+TEMP_FILE_NAME=${TEMP_FILE}_02_monasca_publisher
+TEMP_FILE_LIST="$TEMP_FILE_LIST $TEMP_FILE_NAME"; cat > $TEMP_FILE_NAME <<-EOF
+	sinks:
+		- name: meter_sink
+		  transformers:
+		  publishers:
+			- notifier://
+			- monasca://$MONASCA_URL
+EOF
+cat $PIPELINE_CONF | sed 's/^[ \t]*//' > $TEMP_FILE_CONFIG
+printf "[$PIPELINE_CONF]\n" > $TEMP_FILE_OUTPUT
+RESULT="OK"
+for FILE in $TEMP_FILE_LIST; do
+	if ! test -s $TEMP_FILE_CONFIG; then
+		RESULT="Configuration file not found"
+	elif ! check_file_contains $FILE $TEMP_FILE_CONFIG; then
+		RESULT="Missing configuration values. Please check:"
+		(echo "----------"; cat $FILE) >> $TEMP_FILE_OUTPUT
+	fi
+done
+if [ "$RESULT" = "OK" ]; then
+	printf_ok "$RESULT"
+else
+	printf_fail "$RESULT"
+	printf_fail "$(cat $TEMP_FILE_OUTPUT)"
+fi
+for FILE in $TEMP_FILE_LIST $TEMP_FILE_CONFIG $TEMP_FILE_OUTPUT; do
+	rm -f $FILE
+done
+
+# Check Ceilosca configuration at this node
+printf "Check Ceilosca configuration at this node... "
+GITHUB_REPO=SmartInfrastructures/ceilometer-plugin-fiware
+BASE_URL=https://raw.githubusercontent.com/$GITHUB_REPO/$RELEASE
+URL=$BASE_URL/config/controller/etc/ceilometer/monasca_field_definitions.yaml
+FILE_1=$CEILOSCA_CONF
+FILE_2=$TEMP_FILE
+curl $URL -s -S -o $FILE_2
+if [ -z "$(diff -q $FILE_1 $FILE_2)" ]; then
+	printf_ok "OK"
+else
+	printf_fail "Invalid configuration file $CEILOSCA_CONF"
+	printf_fail "* See $URL"
 fi
 
 # Check last poll from region pollster at this node
@@ -525,16 +643,22 @@ printf "Check Monasca recent metadata for region... "
 START_SOME_TIME_AGO=$(date -u -d @$SOME_TIME_AGO +%Y-%m-%dT%H:%M:%SZ)
 FILTER="start_time=$START_SOME_TIME_AGO&merge_metrics=true"
 QUERY="/metrics/measurements?name=region.pool_ip&dimensions=region:$REGION"
-PATTERN="latitude|longitude|location|cpu_allocation_ratio|ram_allocation_ratio"
+PATTERN='"('$(echo $METADATA_FOR_REGIONS | tr ' ' '|')')"'
 COUNT=$(echo "$PATTERN" | awk -F'|' '{print NF}')
 RESPONSE=$(printf_monasca_query "$QUERY&$FILTER")
 MEASURES_COUNT=$(echo "$RESPONSE" | grep -v '"id"' | grep 'Z"' | wc -l)
 METADATA_ACTUAL=$(echo "$RESPONSE" | egrep "$PATTERN" | wc -l)
 METADATA_EXPECT=$((MEASURES_COUNT * COUNT))
 if [ $METADATA_ACTUAL -eq $METADATA_EXPECT ]; then
-	printf_ok "OK ($COUNT: $(echo "$PATTERN" | tr '|' ' '))"
+	printf_ok "OK ($COUNT:" $METADATA_FOR_REGIONS ")"
+elif [ $METADATA_ACTUAL -eq 0 ]; then
+	printf_fail "Missing metadata (expected $COUNT items per measurement)"
 else
-	printf_fail "Missing metadata"
+	LIST=""
+	for NAME in $METADATA_FOR_REGIONS; do
+		echo "$RESPONSE" | egrep -q "\"$NAME\"" || LIST="$LIST $NAME"
+	done
+	printf_warn "Could not find these items:$LIST"
 fi
 
 # Check Monasca recent measurements for region
@@ -621,7 +745,7 @@ fi
 # Check execution of remote commands at compute nodes
 printf "Check execution of remote commands at compute nodes... "
 if check_ssh $COMPUTE_NODES; then
-	printf_ok "OK ($SSH)"
+	printf_ok "OK ($SSH_CMD)"
 else
 	printf_fail "Could not get ssh access to compute nodes (check ssh-key)"
 fi
@@ -630,10 +754,10 @@ fi
 FILE=$PIPELINE_CONF
 for NAME in $COMPUTE_NODES; do
 	printf "Check Ceilometer polling frequency at compute node $NAME... "
-	REMOTE="$SSH $NAME"
+	REMOTE="$SSH_CMD $NAME"
 	AWK="awk -F: '/interval/ {print \$2; exit}' $FILE"
 	POLL_RATE=$($REMOTE "$AWK" 2>/dev/null | trim)
-	if [ -z "$SSH" ]; then
+	if [ -z "$SSH_CMD" ]; then
 		printf_fail "Skipped"
 	elif [ -z "$POLL_RATE" ]; then
 		printf_fail "Ceilometer pipeline configuration $FILE not found"
@@ -645,7 +769,7 @@ for NAME in $COMPUTE_NODES; do
 done
 
 # Check Ceilometer entry points at compute nodes
-FILE=$PYTHON_DIST_PKG/ceilometer-*.egg-info/entry_points.txt
+FILE=$PYTHON_SITE_PKG/ceilometer-\*.egg-info/entry_points.txt
 POINTS="compute.info.*HostPollster \
 	cpu.*CPUPollster \
 	memory.usage.*MemoryUsagePollster \
@@ -653,11 +777,11 @@ POINTS="compute.info.*HostPollster \
 	disk.capacity.*CapacityPollster"
 for NAME in $COMPUTE_NODES; do
 	printf "Check Ceilometer entry points at compute node $NAME... "
-	if [ -z "$SSH" ]; then
+	if [ -z "$SSH_CMD" ]; then
 		printf_fail "Skipped"
 		continue
 	fi
-	REMOTE="$SSH $NAME"
+	REMOTE="$SSH_CMD $NAME"
 	SED="sed -n '/\[ceilometer.poll.compute\]/,/\[/ p' $FILE"
 	POLL_COMPUTE_SECTION=$($REMOTE "$SED" 2>/dev/null)
 	for PATTERN in $POINTS; do
@@ -679,9 +803,9 @@ CLASSNAME=ceilometer.compute.pollsters.host.HostPollster
 PYTHON="python -c \"import ${CLASSNAME%.*}; print $CLASSNAME\""
 for NAME in $COMPUTE_NODES; do
 	printf "Check Ceilometer host pollster class at compute node $NAME... "
-	REMOTE="$SSH $NAME"
+	REMOTE="$SSH_CMD $NAME"
 	CLASS=$($REMOTE "$PYTHON" 2>/dev/null)
-	if [ -z "$SSH" ]; then
+	if [ -z "$SSH_CMD" ]; then
 		printf_fail "Skipped"
 	elif [ "$CLASS" != "<class '$CLASSNAME'>" ]; then
 		printf_fail "Could not load class (please check installation)"
@@ -690,14 +814,80 @@ for NAME in $COMPUTE_NODES; do
 	fi
 done
 
+# Check Ceilometer configuration at compute nodes
+TEMP_FILE_LIST=""
+TEMP_FILE_CONFIG=${TEMP_FILE}.cfg
+TEMP_FILE_OUTPUT=${TEMP_FILE}.out
+TEMP_FILE_NAME=${TEMP_FILE}_01_meter_sink
+TEMP_FILE_LIST="$TEMP_FILE_LIST $TEMP_FILE_NAME"; cat > $TEMP_FILE_NAME <<-"EOF"
+	meters:
+		- "*"
+	sinks:
+		- meter_sink
+EOF
+TEMP_FILE_NAME=${TEMP_FILE}_02_cpu_sink
+TEMP_FILE_LIST="$TEMP_FILE_LIST $TEMP_FILE_NAME"; cat > $TEMP_FILE_NAME <<-"EOF"
+	meters:
+		- "cpu"
+	sinks:
+		- cpu_sink
+EOF
+TEMP_FILE_NAME=${TEMP_FILE}_03_cpu_util
+TEMP_FILE_LIST="$TEMP_FILE_LIST $TEMP_FILE_NAME"; cat > $TEMP_FILE_NAME <<-"EOF"
+	target:
+		name: "cpu_util"
+		unit: "%"
+		type: "gauge"
+		scale: "100.0 / (10**9 * (resource_metadata.cpu_number or 1))"
+EOF
+TEMP_FILE_NAME=${TEMP_FILE}_04_memory_sink
+TEMP_FILE_LIST="$TEMP_FILE_LIST $TEMP_FILE_NAME"; cat > $TEMP_FILE_NAME <<-"EOF"
+	meters:
+		- "memory.usage"
+	sinks:
+		- memory_sink
+EOF
+TEMP_FILE_NAME=${TEMP_FILE}_05_memory_util
+TEMP_FILE_LIST="$TEMP_FILE_LIST $TEMP_FILE_NAME"; cat > $TEMP_FILE_NAME <<-"EOF"
+	target:
+		name: "memory_util"
+		unit: "%"
+		type: "gauge"
+		expr: "100 * $(memory.usage) / ($(memory.usage).resource_metadata.memory_mb)"
+EOF
+for NAME in $COMPUTE_NODES; do
+	printf "Check Ceilometer configuration at compute node $NAME... "
+	RESULT="OK"
+	REMOTE="$SSH_CMD $NAME"
+	$REMOTE "cat $PIPELINE_CONF" | sed 's/^[ \t]*//' > $TEMP_FILE_CONFIG
+	printf "[$PIPELINE_CONF]\n" > $TEMP_FILE_OUTPUT
+	for FILE in $TEMP_FILE_LIST; do
+		if ! test -s $TEMP_FILE_CONFIG; then
+			RESULT="Configuration file not found"
+		elif ! check_file_contains $FILE $TEMP_FILE_CONFIG; then
+			RESULT="Missing configuration values. Please check:"
+			(echo "----------"; cat $FILE) >> $TEMP_FILE_OUTPUT
+		fi
+	done
+	if [ "$RESULT" = "OK" ]; then
+		printf_ok "$RESULT"
+	else
+		printf_fail "$RESULT"
+		printf_fail "$(cat $TEMP_FILE_OUTPUT)"
+	fi
+done
+for FILE in $TEMP_FILE_LIST $TEMP_FILE_CONFIG $TEMP_FILE_OUTPUT; do
+	rm -f $FILE
+done
+
 # Check last poll from host pollster at compute nodes
 for NAME in $COMPUTE_NODES; do
 	printf "Check last poll from host pollster at compute node $NAME... "
 	PATTERN="$(date +%Y-%m-%d).*Polling pollster compute\.info"
 	GREP="grep \"$PATTERN\" $COMPUTE_AGENT_LOG"
-	REMOTE="$SSH $NAME"
+	REMOTE="$SSH_CMD $NAME"
 	TIMESTAMP=$($REMOTE "$GREP" 2>/dev/null | tail -1 | cut -d' ' -f1,2)
-	if [ -z "$SSH" ]; then
+	if [ -z "$SSH_CMD" ]; then
 		printf_fail "Skipped"
 		continue
 	elif [ -z "$TIMESTAMP" ]; then
@@ -738,8 +928,7 @@ for NAME in $METRICS; do
 	else
 		printf_warn "Warning ($COUNT measurements, $NODE_MSG)"
 		[ -z "$VERBOSE" ] && continue
-		printf_warn "* Compute nodes with metrics: $NODE_NAMES"
-		printf_curl "* Sample Monasca API query: "
+		printf_info "* Compute nodes with metrics: $NODE_NAMES"
 		printf "\n"
 	fi
 done
@@ -828,10 +1017,15 @@ for ID in $VMS; do
 	COUNT_ACTUAL=$(echo $ACTUAL | wc -w)
 	if [ $COUNT_ACTUAL -ge $COUNT_EXPECTED ]; then
 		printf_ok "OK ($COUNT_ACTUAL: $EXPECTED)"
-	elif [ $COUNT_ACTUAL -gt 0 ]; then
-		printf_warn "$COUNT_ACTUAL out of $COUNT_EXPECTED ($ACTUAL)"
-	else
+	elif [ $COUNT_ACTUAL -eq 0 ]; then
 		printf_fail "No measurements found"
 		[ -n "$VERBOSE" ] && printf_curl
+	else
+		LIST=""
+		REGEX=$(echo ^\\\($ACTUAL\\\)\$ | sed 's/ /\\|/g; s/\./\\\./g')
+		for NAME in $EXPECTED; do
+			expr $NAME : "$REGEX" >/dev/null || LIST="$LIST $NAME"
+		done
+		printf_warn "Could not find these measurements:$LIST"
 	fi
 done
