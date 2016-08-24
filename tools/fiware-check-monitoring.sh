@@ -154,6 +154,16 @@ check_ssh() {
 	return $status
 }
 
+check_version() {
+	current=$1
+	required=$2
+	printf "$current\n$required" | awk '{
+		if (split($0,v,".") < 3) v[3] = 0;
+		for (i in v) printf "%05d ", v[i];
+		print
+		}' | sort | tail -1 | cat -E | fgrep -q $current'$'
+}
+
 check_file_contains() {
 	file_embedded=$1
 	file_container=$2
@@ -298,6 +308,14 @@ METADATA_FOR_REGIONS="\
 	keystone_version \
 	ceilometer_version"
 
+# Required versions for components
+REQ_VERSION_PYTHON=2.7
+REQ_VERSION_AGENT=1.1.21-FIWARE
+REQ_VERSION_CEILOSCA=2015.1-FIWARE
+REQ_VERSION_CEILOMETER=2015.1.1
+REQ_VERSION_POLLSTER_HOST=1.0.0
+REQ_VERSION_POLLSTER_REGION=1.0.2
+
 # Timestamps
 NOW=$(date +%s)
 SOME_TIME_AGO=$((NOW - $MEASURE_TIME * 60))
@@ -308,20 +326,25 @@ printf_info "[Considering measurements within last $MEASURE_TIME minutes]\n"
 
 # Check Python interpreter
 printf "Check Python interpreter... "
+CUR_VERSION=$(python -V 2>&1 | cut -d' ' -f2)
+REQ_VERSION=$REQ_VERSION_PYTHON
 if [ -n "$VIRTUAL_ENV" ]; then
 	printf_fail "Python virtualenv $VIRTUAL_ENV should not be active"
 	exit 2
+elif ! check_version "$CUR_VERSION" "$REQ_VERSION"; then
+	printf_fail "$CUR_VERSION at $(which python): $REQ_VERSION required"
 else
-	printf_ok "$(python -V 2>&1) at $(which python)"
+	printf_ok "OK ($CUR_VERSION at $(which python))"
 fi
 
 # Check Monasca Agent (installation path and version)
 printf "Check Monasca Agent installation... "
+REQ_VERSION=$REQ_VERSION_AGENT
 for DIR in /opt/monasca /monasca/monasca_agent_env; do
 	if [ -d $DIR ]; then
 		MONASCA_AGENT_HOME=$DIR
-		INFO=$($MONASCA_AGENT_HOME/bin/pip show monasca-agent 2>&1)
-		VERSION=$(echo "$INFO" | awk '/^Version:/ {print $2}')
+		PKG_INFO=$($MONASCA_AGENT_HOME/bin/pip show monasca-agent 2>&1)
+		CUR_VERSION=$(echo "$PKG_INFO" | awk '/^Version:/ {print $2}')
 		break
 	fi
 done
@@ -329,9 +352,11 @@ if [ -z "$MONASCA_AGENT_HOME" ]; then
 	printf_fail "Not found"
 	exit 2
 elif [ $(expr "$MONASCA_AGENT_HOME" : "^/opt/.*") -eq 0 ]; then
-	printf_warn "$VERSION at $MONASCA_AGENT_HOME (this path is deprecated)"
+	printf_warn "$CUR_VERSION at $MONASCA_AGENT_HOME (path is deprecated)"
+elif ! check_version "$CUR_VERSION" "$REQ_VERSION"; then
+	printf_fail "$CUR_VERSION at $MONASCA_AGENT_HOME: $REQ_VERSION required"
 else
-	printf_ok "$VERSION at $MONASCA_AGENT_HOME"
+	printf_ok "OK ($CUR_VERSION at $MONASCA_AGENT_HOME)"
 fi
 
 # Check Monasca Agent (configuration)
@@ -454,34 +479,43 @@ fi
 
 # Check Ceilometer installation path and version
 printf "Check Ceilometer installation path and version... "
+REQ_VERSION=$REQ_VERSION_CEILOMETER
+CUR_VERSION=$(pip show ceilometer 2>&1 | awk '/^Version:/ {print $2}')
 PYTHON_SITE_PKG=$(python -c "import site; path = site.getsitepackages(); \
-	print [dir for dir in path if dir.endswith('packages')][-1]")
-if [ -d "$PYTHON_SITE_PKG/ceilometer" ]; then
-	CEILOMETER_PKG="$PYTHON_SITE_PKG/ceilometer"
-	VERSION=$(pip show ceilometer | awk '/^Version:/ {print $2}')
-	printf_ok "$VERSION at $CEILOMETER_PKG"
-else
+		print [dir for dir in path if dir.endswith('packages')][-1]")
+CEILOMETER_PKG="$PYTHON_SITE_PKG/ceilometer"
+if [ ! -d "$CEILOMETER_PKG" ]; then
 	printf_fail "Not found"
+elif ! check_version "$CUR_VERSION" "$REQ_VERSION"; then
+	printf_fail "$CUR_VERSION at $CEILOMETER_PKG: $REQ_VERSION required"
+else
+	printf_ok "OK ($CUR_VERSION at $CEILOMETER_PKG)"
 fi
 
 # Check Ceilometer plugin for Monasca (Ceilosca)
 printf "Check Ceilometer plugin for Monasca (Ceilosca)... "
 FILE=$PYTHON_SITE_PKG/ceilometer-*.egg-info/ceilosca.txt
-VERSION=$(awk -F= '{print $2}' $FILE 2>/dev/null)
-if [ -n "$VERSION" ]; then
-	printf_ok "$VERSION"
-else
+CUR_VERSION=$(awk -F= '{print $2}' $FILE 2>/dev/null)
+REQ_VERSION=$REQ_VERSION_CEILOSCA
+if [ -z "$CUR_VERSION" ]; then
 	printf_warn "Could not find version (please check installation details)"
+elif ! check_version "$CUR_VERSION" "$REQ_VERSION"; then
+	printf_fail "$CUR_VERSION found: $REQ_VERSION required"
+else
+	printf_ok "OK ($CUR_VERSION)"
 fi
 
 # Check Ceilometer region pollster version
 printf "Check Ceilometer region pollster version... "
 POLLSTER=$CEILOMETER_PKG/region/region.py
-VERSION=$(awk '/# Version:/ {print $3}' $POLLSTER)
-if [ -n "$VERSION" ]; then
-	printf_ok "$VERSION"
-else
+CUR_VERSION=$(awk '/# Version:/ {print $3}' $POLLSTER)
+REQ_VERSION=$REQ_VERSION_POLLSTER_REGION
+if [ -z "$CUR_VERSION" ]; then
 	printf_warn "Could not find version (please check installation details)"
+elif ! check_version "$CUR_VERSION" "$REQ_VERSION"; then
+	printf_fail "$CUR_VERSION found: $REQ_VERSION required"
+else
+	printf_ok "OK ($CUR_VERSION)"
 fi
 
 # Check Ceilometer region pollster class
@@ -811,6 +845,24 @@ for NAME in $COMPUTE_NODES; do
 		printf_fail "Could not load class (please check installation)"
 	else
 		printf_ok "$CLASSNAME"
+	fi
+done
+
+# Check Ceilometer host pollster version at compute nodes
+POLLSTER=$PYTHON_SITE_PKG/ceilometer/compute/pollsters/host.py
+REQ_VERSION=$REQ_VERSION_POLLSTER_HOST
+for NAME in $COMPUTE_NODES; do
+	printf "Check Ceilometer host pollster version at compute node $NAME... "
+	REMOTE="$SSH_CMD $NAME"
+	CUR_VERSION=$($REMOTE "cat $POLLSTER" | awk '/# Version:/ {print $3}')
+	if [ -z "$SSH_CMD" ]; then
+		printf_fail "Skipped"
+	elif [ -z "$CUR_VERSION" ]; then
+		printf_warn "Could not find version (please check installation)"
+	elif ! check_version "$CUR_VERSION" "$REQ_VERSION"; then
+		printf_fail "$CUR_VERSION found: $REQ_VERSION required"
+	else
+		printf_ok "OK ($CUR_VERSION)"
 	fi
 done
 
