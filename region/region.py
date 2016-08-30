@@ -3,7 +3,7 @@
 #
 # Author: Attilio Broglio <abroglio AT create-net DOT org>
 #
-# Version: 1.0.2
+# Version: 1.0.3
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -92,7 +92,7 @@ class RegionPollster(_Base):
                             if sN["subnet"]["allocation_pools"] and len(sN["subnet"]["allocation_pools"]) > 0:
                                 for pool in sN["subnet"]["allocation_pools"]:
                                     subNet.append(IPRange(pool["start"], pool["end"]))
-                                    pool_size += len(IPRange(pool["start"], pool["end"]))
+                                    pool_size += IPRange(pool["start"], pool["end"]).size
 
         # compute the IP usage
         netF = neutron.list_floatingips()
