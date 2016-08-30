@@ -3,7 +3,7 @@
 #
 # Author: Attilio Broglio <abroglio AT create-net DOT org>
 #
-# Version: 1.0.0
+# Version: 1.0.1
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -29,6 +29,10 @@ LOG = log.getLogger(__name__)
 
 
 class HostPollster(pollsters.BaseComputePollster):
+
+    @property
+    def default_discovery(self):
+        return 'local_node'
 
     @staticmethod
     def get_samples(manager, cache, resources):
