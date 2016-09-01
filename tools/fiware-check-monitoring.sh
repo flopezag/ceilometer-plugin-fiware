@@ -1,5 +1,5 @@
 #!/bin/sh
-# -*- coding: utf-8; version: 5.4.1 -*-
+# -*- coding: utf-8; version: 5.4.2 -*-
 #
 # Copyright 2016 Telefónica I+D
 # All Rights Reserved.
@@ -313,8 +313,8 @@ REQ_VERSION_PYTHON=2.7
 REQ_VERSION_AGENT=1.1.21-FIWARE
 REQ_VERSION_CEILOSCA=2015.1-FIWARE
 REQ_VERSION_CEILOMETER=2015.1.1
-REQ_VERSION_POLLSTER_HOST=1.0.0
-REQ_VERSION_POLLSTER_REGION=1.0.2
+REQ_VERSION_POLLSTER_HOST=1.0.1
+REQ_VERSION_POLLSTER_REGION=1.0.3
 
 # Timestamps
 NOW=$(date +%s)
