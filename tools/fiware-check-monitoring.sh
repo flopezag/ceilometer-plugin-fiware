@@ -640,7 +640,7 @@ if [ -z "$(diff -q $FILE_1 $FILE_2)" ]; then
 	printf_ok "OK"
 else
 	printf_fail "Invalid configuration file $CEILOSCA_CONF"
-	printf_fail "* See $URL"
+	printf_info "* See $URL"
 fi
 
 # Check last poll from region pollster at this node
