@@ -683,16 +683,21 @@ RESPONSE=$(printf_monasca_query "$QUERY&$FILTER")
 MEASURES_COUNT=$(echo "$RESPONSE" | grep -v '"id"' | grep 'Z"' | wc -l)
 METADATA_ACTUAL=$(echo "$RESPONSE" | egrep "$PATTERN" | wc -l)
 METADATA_EXPECT=$((MEASURES_COUNT * COUNT))
+METADATA_MISSING=""
+for NAME in $METADATA_FOR_REGIONS; do
+	echo "$RESPONSE" | fgrep -q "\"$NAME\"" \
+	|| METADATA_MISSING="$METADATA_MISSING $NAME"
+done
 if [ $METADATA_ACTUAL -eq $METADATA_EXPECT ]; then
 	printf_ok "OK ($COUNT:" $METADATA_FOR_REGIONS ")"
 elif [ $METADATA_ACTUAL -eq 0 ]; then
-	printf_fail "Missing metadata (expected $COUNT items per measurement)"
+	printf_fail "No metadata found (expected $COUNT items per measurement)"
+elif [ -n "$METADATA_MISSING" ]; then
+	printf_warn "Could not find these items:$METADATA_MISSING"
 else
-	LIST=""
-	for NAME in $METADATA_FOR_REGIONS; do
-		echo "$RESPONSE" | egrep -q "\"$NAME\"" || LIST="$LIST $NAME"
-	done
-	printf_warn "Could not find these items:$LIST"
+	printf_warn "Only $((METADATA_ACTUAL / COUNT))" \
+	            "out of $MEASURES_COUNT measurements" \
+	            "with $COUNT metadata items"
 fi
 
 # Check Monasca recent measurements for region
