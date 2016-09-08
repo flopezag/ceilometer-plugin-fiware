@@ -48,7 +48,8 @@
 OPTS="v(verbose)r(region):p(poll-threshold):m(measure-time):k(ssh-key):"
 OPTS="${OPTS}h(help)V(version)"
 PROG=$(basename $0)
-RELEASE=$(awk '/-\*-/ {print "v" $(NF-1) "\n"}' $0);
+VERSION=$(awk '/-\*-/ {print "v" $(NF-1) "\n"}' $0)
+RELEASE=$(echo $VERSION | cut -d. -f1-3)
 
 # Files
 TEMP_FILE=/tmp/${PROG%.sh}
@@ -91,7 +92,7 @@ case $OPT in
 'm')	MEASURE_TIME=$OPTARG;;
 'k')	SSH_KEY=$OPTARG;;
 'h')	OPTERR="$OPTHLP";;
-'V')	OPTERR="$RELEASE"; printf "$OPTERR\n" 1>&2; exit 1;;
+'V')	OPTERR="$VERSION"; printf "$OPTERR\n" 1>&2; exit 1;;
 '?')	OPTERR="Unknown option -$OPTARG";;
 ':')	OPTERR="Missing value for option -$OPTARG";;
 '-')	OPTLONG="${OPTARG%=*}";
