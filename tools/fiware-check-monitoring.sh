@@ -130,7 +130,7 @@ COUNT=$(env | egrep 'OS_(AUTH_URL|USERNAME|PASSWORD|TENANT_NAME)' | wc -l)
 
 # Common functions
 check_ssh() {
-	SSH_CMD=ssh
+	SSH_CMD="ssh -q"
 	status=0
 	hosts="$*"
 	for name in $hosts; do
@@ -143,7 +143,7 @@ check_ssh() {
 		ssh_key_files="${SSH_KEY:-~/.ssh/fuel_id_rsa ~/.ssh/id_rsa}"
 		for name in $hosts; do
 			for file in $ssh_key_files; do
-				SSH_CMD="ssh -i $file"
+				SSH_CMD="ssh -q -i $file"
 				if $SSH_CMD $name "ls" >/dev/null 2>&1; then
 					status=0
 					break
