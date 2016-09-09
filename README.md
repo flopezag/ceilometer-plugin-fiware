@@ -219,7 +219,7 @@ send samples to Monasca:
 
    ```
    # VERSION=2015.1-FIWARE-5.3.3
-   # echo version=$VERSION > $PYTHON_SITE_PKG/ceilometer-2015.1.*.egg-info/ceilosca.txt
+   # (cd $PYTHON_SITE_PKG/ceilometer-2015.1.*.egg-info; echo version=$VERSION > ceilosca.txt)
    ```
 
 3. Edit the entry points file to add the following entries:
