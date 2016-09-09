@@ -48,7 +48,7 @@
 OPTS="v(verbose)r(region):p(poll-threshold):m(measure-time):k(ssh-key):"
 OPTS="${OPTS}h(help)V(version)"
 PROG=$(basename $0)
-VERSION=$(awk '/-\*-/ {print "v" $(NF-1) "\n"}' $0)
+VERSION=$(awk '/-\*-/ {print "v" $(NF-1)}' $0)
 RELEASE=$(echo $VERSION | cut -d. -f1-3)
 
 # Files
@@ -414,8 +414,11 @@ fi
 # Check Monasca Agent (keystone_url)
 printf "Check Monasca Keystone URL... "
 URL=$(sed -n '/^ *keystone_url/ p' $MONASCA_AGENT_CONF | cut -d: -f2- | trim)
-if [ -n "$URL" ]; then
+API=${URL##*/}
+if [ "$API" = "v3" ]; then
 	printf_ok "$URL"
+elif [ -n "$URL" ]; then
+	printf_fail "Use V3 API for 'keystone_url' in $MONASCA_AGENT_CONF"
 else
 	printf_fail "Set 'keystone_url' value in $MONASCA_AGENT_CONF"
 fi
