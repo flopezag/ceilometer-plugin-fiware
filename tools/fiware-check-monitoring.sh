@@ -1,5 +1,5 @@
 #!/bin/sh
-# -*- coding: utf-8; version: 5.4.2 -*-
+# -*- coding: utf-8; version: 5.4.2.1 -*-
 #
 # Copyright 2016 Telefónica I+D
 # All Rights Reserved.
@@ -48,7 +48,8 @@
 OPTS="v(verbose)r(region):p(poll-threshold):m(measure-time):k(ssh-key):"
 OPTS="${OPTS}h(help)V(version)"
 PROG=$(basename $0)
-RELEASE=$(awk '/-\*-/ {print "v" $(NF-1) "\n"}' $0);
+VERSION=$(awk '/-\*-/ {print "v" $(NF-1)}' $0)
+RELEASE=$(echo $VERSION | cut -d. -f1-3)
 
 # Files
 TEMP_FILE=/tmp/${PROG%.sh}
@@ -91,7 +92,7 @@ case $OPT in
 'm')	MEASURE_TIME=$OPTARG;;
 'k')	SSH_KEY=$OPTARG;;
 'h')	OPTERR="$OPTHLP";;
-'V')	OPTERR="$RELEASE"; printf "$OPTERR\n" 1>&2; exit 1;;
+'V')	OPTERR="$VERSION"; printf "$OPTERR\n" 1>&2; exit 1;;
 '?')	OPTERR="Unknown option -$OPTARG";;
 ':')	OPTERR="Missing value for option -$OPTARG";;
 '-')	OPTLONG="${OPTARG%=*}";
@@ -129,7 +130,7 @@ COUNT=$(env | egrep 'OS_(AUTH_URL|USERNAME|PASSWORD|TENANT_NAME)' | wc -l)
 
 # Common functions
 check_ssh() {
-	SSH_CMD=ssh
+	SSH_CMD="ssh -q"
 	status=0
 	hosts="$*"
 	for name in $hosts; do
@@ -142,7 +143,7 @@ check_ssh() {
 		ssh_key_files="${SSH_KEY:-~/.ssh/fuel_id_rsa ~/.ssh/id_rsa}"
 		for name in $hosts; do
 			for file in $ssh_key_files; do
-				SSH_CMD="ssh -i $file"
+				SSH_CMD="ssh -q -i $file"
 				if $SSH_CMD $name "ls" >/dev/null 2>&1; then
 					status=0
 					break
@@ -311,7 +312,7 @@ METADATA_FOR_REGIONS="\
 # Required versions for components
 REQ_VERSION_PYTHON=2.7
 REQ_VERSION_AGENT=1.1.21-FIWARE
-REQ_VERSION_CEILOSCA=2015.1-FIWARE
+REQ_VERSION_CEILOSCA=2015.1-FIWARE-5.3.3
 REQ_VERSION_CEILOMETER=2015.1.1
 REQ_VERSION_POLLSTER_HOST=1.0.1
 REQ_VERSION_POLLSTER_REGION=1.0.3
@@ -413,8 +414,11 @@ fi
 # Check Monasca Agent (keystone_url)
 printf "Check Monasca Keystone URL... "
 URL=$(sed -n '/^ *keystone_url/ p' $MONASCA_AGENT_CONF | cut -d: -f2- | trim)
-if [ -n "$URL" ]; then
+API=${URL##*/}
+if [ "$API" = "v3" ]; then
 	printf_ok "$URL"
+elif [ -n "$URL" ]; then
+	printf_fail "Use V3 API for 'keystone_url' in $MONASCA_AGENT_CONF"
 else
 	printf_fail "Set 'keystone_url' value in $MONASCA_AGENT_CONF"
 fi
@@ -639,7 +643,7 @@ if [ -z "$(diff -q $FILE_1 $FILE_2)" ]; then
 	printf_ok "OK"
 else
 	printf_fail "Invalid configuration file $CEILOSCA_CONF"
-	printf_fail "* See $URL"
+	printf_info "* See $URL"
 fi
 
 # Check last poll from region pollster at this node
@@ -683,16 +687,21 @@ RESPONSE=$(printf_monasca_query "$QUERY&$FILTER")
 MEASURES_COUNT=$(echo "$RESPONSE" | grep -v '"id"' | grep 'Z"' | wc -l)
 METADATA_ACTUAL=$(echo "$RESPONSE" | egrep "$PATTERN" | wc -l)
 METADATA_EXPECT=$((MEASURES_COUNT * COUNT))
+METADATA_MISSING=""
+for NAME in $METADATA_FOR_REGIONS; do
+	echo "$RESPONSE" | fgrep -q "\"$NAME\"" \
+	|| METADATA_MISSING="$METADATA_MISSING $NAME"
+done
 if [ $METADATA_ACTUAL -eq $METADATA_EXPECT ]; then
 	printf_ok "OK ($COUNT:" $METADATA_FOR_REGIONS ")"
 elif [ $METADATA_ACTUAL -eq 0 ]; then
-	printf_fail "Missing metadata (expected $COUNT items per measurement)"
+	printf_fail "No metadata found (expected $COUNT items per measurement)"
+elif [ -n "$METADATA_MISSING" ]; then
+	printf_warn "Could not find these items:$METADATA_MISSING"
 else
-	LIST=""
-	for NAME in $METADATA_FOR_REGIONS; do
-		echo "$RESPONSE" | egrep -q "\"$NAME\"" || LIST="$LIST $NAME"
-	done
-	printf_warn "Could not find these items:$LIST"
+	printf_warn "Only $((METADATA_ACTUAL / COUNT))" \
+	            "out of $MEASURES_COUNT measurements" \
+	            "with $COUNT metadata items"
 fi
 
 # Check Monasca recent measurements for region
