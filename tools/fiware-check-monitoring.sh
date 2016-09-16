@@ -1,5 +1,5 @@
 #!/bin/sh
-# -*- coding: utf-8; version: 5.4.2.1 -*-
+# -*- coding: utf-8; version: 5.4.3 -*-
 #
 # Copyright 2016 Telefónica I+D
 # All Rights Reserved.
@@ -194,8 +194,9 @@ get_keystone_token() {
 	auth=$(echo "$response" | awk '/"token"/,/\}/ {print}')
 	role=$(echo "$response" | awk '/"roles"/,/\]/ {print}')
 	AUTH_TOKEN=$(echo "$auth" | awk -F\" '/"id"/ {print $4; exit}')
-	USER_ROLES=$(echo "$role" | awk -F\" '/"name"/ {print $4}')
+	USER_ROLES=$(echo "$role" | awk -F\" '/"name"/ {print $4}' | fmt)
 	[ -n "$VERBOSE" ] && printf "$curl\nResponse:\n$response\n" > $TEMP_FILE
+	return 0
 }
 
 printf_monasca_query() {
