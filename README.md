@@ -4,18 +4,9 @@
 	- [Description](#description)
 	- [Installation](#installation)
 		- [Controller(s)](#controllers)
-			- Pollster for region
-			- Pollster for image
 		- [Compute nodes](#compute-nodes)
-			- Pollster for hosts
-			- Pollster for vm
-			- Configuration files
 		- [Monasca](#monasca)
-			- Monasca Ceilometer plugin
-			- Monasca Agent
 	- [Verification](#verification)
-		- Overall checks
-		- Ceilometer queries
 	- [License](#license)
 
 # FIWARE Lab monitoring system (based on Ceilometer and Monasca)
