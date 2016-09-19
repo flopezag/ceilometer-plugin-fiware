@@ -519,3 +519,6 @@ https://github.com/SmartInfrastructures/FIWARELab-monitoringAPI
 [fiware_monitoring_architecture_pict]:
 /img/FIWARE_Monitoring_Arch.png
 "FIWARE Monitoring Architecture"
+
+## License
+Apache License, Version 2.0, January 2004
