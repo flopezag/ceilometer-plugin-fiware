@@ -1,13 +1,15 @@
-**Table of Contents**
+#<a name="top"></a>FIWARE Lab monitoring system (based on Ceilometer and Monasca)
 
-- FIWARE Lab monitoring system (based on Ceilometer and Monasca)
-	- [Description](#description)
-	- [Installation](#installation)
-		- [Controller(s)](#controllers)
-		- [Compute nodes](#compute-nodes)
-		- [Monasca](#monasca)
-	- [Verification](#verification)
-	- [License](#license)
+[![License badge](https://img.shields.io/badge/license-AGPL-blue.svg)](http://www.apache.org/licenses/LICENSE-2.0)
+[![Documentation badge](http://docs.federationmonitoring.apiary.io/#)](http://fiware-orion.readthedocs.org/en/latest/?badge=latest)
+
+* [Description](#description)
+* [Installation](#installation)
+	* [Controller(s)](#controllers)
+	* [Compute nodes](#compute-nodes)
+	* [Monasca](#monasca)
+* [Verification](#verification)
+* [License](#license)
 
 # FIWARE Lab monitoring system (based on Ceilometer and Monasca)
 
