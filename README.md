@@ -1,7 +1,7 @@
 #<a name="top"></a>FIWARE Lab monitoring system (based on Ceilometer and Monasca)
 
 [![License badge](https://img.shields.io/badge/license-AGPL-blue.svg)](http://www.apache.org/licenses/LICENSE-2.0)
-[![Documentation badge](http://docs.federationmonitoring.apiary.io/#)](http://fiware-orion.readthedocs.org/en/latest/?badge=latest)
+[![Documentation badge](https://readthedocs.org/projects/fiware-orion/badge/?version=latest)](http://docs.federationmonitoring.apiary.io/#)
 
 * [Description](#description)
 * [Installation](#installation)
