@@ -22,28 +22,35 @@
 #
 # Usage:
 #   $0 --help | --version
-#   $0 [--verbose] [--mongodb-host=HOST]
+#   $0 [--verbose] [--monitoring-api=URL] [--mongodb-host=HOST]
 #
 # Options:
 #   -h, --help 			show this help message and exit
 #   -V, --version 		show version information and exit
 #   -v, --verbose 		enable verbose messages
+#   -a, --monitoring-api=URL	perform checks querying Monitoring API
 #   -m, --mongodb-host=HOST	perform checks related to remote MongoDB
 #
 
-OPTS='h(help)V(version)v(verbose)m(mongodb-host):'
+OPTS='h(help)V(version)v(verbose)a(monitoring-api):m(mongodb-host):'
 PROG=$(basename $0)
 VERSION=$(awk '/-\*-/ {print "v" $(NF-1)}' $0)
 
 # Files
 ZOOKEEPER_CONF=/etc/zookeeper/conf/zoo.cfg
+MONASCA_API_CONF=/etc/monasca/api-config.yml
 PERSISTER_CONF=/etc/monasca/persister-config.yml
 
 # Common definitions
 MONASCA_TOPIC=metrics
 ZOOKEEPER_PORT=
+PERSISTER_MIN_VER=1.0.0
 KAFKA_HOME=
 KAFKA_MIN_VER=2.11
+AUTH_URL=
+AUTH_USER=
+AUTH_PASS=
+AUTH_TOKEN=
 BROKER_URL=
 BROKER_HOST=
 BROKER_PORT=1026
@@ -53,10 +60,12 @@ ADAPTER_HOST=
 ADAPTER_PORT=
 ADAPTER_HOME=
 ADAPTER_MIN_VER=1.4.1
+METRICS_VALIDITY_HOURS=3
 
 # Command line options defaults
 VERBOSE=
 MONGODB_HOST=
+MONITORING_API=
 
 # Command line processing
 OPTERR=
@@ -65,6 +74,7 @@ OPTHLP=$(sed -n '21,/^$/ { s/$0/'$PROG'/; s/^#[ ]\?//; p }' $0)
 while getopts $OPTSTR OPT; do while [ -z "$OPTERR" ]; do
 case $OPT in
 'v')	VERBOSE=true;;
+'a')	MONITORING_API=$OPTARG;;
 'm')	MONGODB_HOST=$OPTARG;
 	BROKER_HOST=$MONGODB_HOST;
 	BROKER_URL=http://$BROKER_HOST:$BROKER_PORT;;
@@ -101,6 +111,45 @@ shift $(expr $OPTIND - 1)
 }
 
 # Common functions
+get_keystone_token() {
+	resp_headers=$(curl -s -S -X POST -o /dev/null -D - \
+		-H "Content-Type: application/json" \
+		-H "Accept: application/json" -d "{
+		    \"auth\": {
+		        \"identity\": {
+		            \"methods\": [
+		                \"password\"
+		            ],
+		            \"password\": {
+		                \"user\": {
+		                    \"domain\": {
+		                        \"id\": \"default\"
+		                    },
+		                    \"name\": \"$AUTH_USER\",
+		                    \"password\": \"$AUTH_PASS\"
+		                }
+		            }
+		        }
+		    }
+		}" "$AUTH_URL/auth/tokens" | fmt)
+	AUTH_TOKEN=$(echo "$resp_headers" | awk '/X-Subject-Token/ {print $NF}')
+	test -n "$AUTH_TOKEN"
+}
+
+printf_service_url() {
+	service_type=$1
+	curl='curl -s -S -H "X-Auth-Token: '$AUTH_TOKEN'"'
+	service_id=$(eval $curl "$AUTH_URL/services?type=$service_type" \
+		| python -mjson.tool | awk -F'"' '/"id"/ {print $4}')
+	endpoint_url=$(eval $curl "$AUTH_URL/endpoints?service_id=$service_id" \
+		| python -mjson.tool | sed -n '/"interface": "public"/,/}/ p' \
+		| awk -F'"' '/"self"/ {print $4}')
+	url=$(eval $curl "$endpoint_url" \
+		| python -mjson.tool \
+		| awk -F'"' '/"url"/ {print $4}')
+	printf "$url\n"
+}
+
 printf_ok() {
 	tput setaf 2; printf "$*\n"; tput sgr0
 }
@@ -154,15 +203,6 @@ pidof() {
 	fi
 	eval $output_var=$pid
 }
-
-# Check OpenStack environment variables
-printf "Check OpenStack environment variables... "
-COUNT=$(env | egrep 'OS_(AUTH_URL|USERNAME|PASSWORD|PROJECT_NAME)' | wc -l)
-if [ $COUNT -ne 4 ]; then
-	printf_fail "Missing OS_* environment variables"
-else
-	printf_ok "OK"
-fi
 
 # Check Zookeeper configuration
 printf "Check Zookeeper configuration... "
@@ -228,40 +268,70 @@ else
 	printf_ok "$RESULT"
 fi
 
+# Check MySQL
+printf "Check MySQL (Monasca configuration storage)... "
+NAME=mysql
+PID=$(ps -f -u $NAME | awk -v PID=none '/'$NAME'/ {PID=$2} END {print PID}')
+PORTS=$(netstat -lnpt4 | tr : ' ' | awk '/'$PID'/ {print $5}' | sort -n | fmt)
+if [ -z "$PID" ]; then
+	printf_fail "Not running"
+else
+	printf_ok "OK: pid=$PID ports=${PORTS:-N/A}"
+fi
+
 # Check InfluxDB
-printf "Check InfluxDB... "
+printf "Check InfluxDB (Monasca measurements storage)... "
 NAME=influxdb
-PID=$(ps -f -u $NAME | awk '/'$NAME'/ {print $2}')
-PORTS=$(netstat -lnpt | awk -F: '/'${PID:-none}'/ {print $4}' | sort -n | fmt)
+PID=$(ps -f -u $NAME | awk -v PID=none '/'$NAME'/ {PID=$2} END {print PID}')
+PORTS=$(netstat -lnpt6 | awk -F: '/'$PID'/ {print $4}' | sort -n | fmt)
 if [ -z "$PID" ]; then
 	printf_fail "Not running"
 else
 	printf_ok "OK: pid=$PID ports=${PORTS:-N/A}"
 fi
 
-# Check Monasca API
-printf "Check Monasca API... "
+# Check Monasca API server
+printf "Check Monasca API server... "
 NAME=monasca-api
-PID=$(ps -f -C java | awk '/'$NAME'/ {print $2}')
-PORTS=$(netstat -lnpt | awk -F: '/'${PID:-none}'/ {print $4}' | sort -n | fmt)
+PID=$(ps -f -C java | awk -v PID=none '/'$NAME'/ {PID=$2} END {print PID}')
+PORTS=$(netstat -lnpt6 | awk -F: '/'$PID'/ {print $4}' | sort -n | fmt)
 if [ -z "$PID" ]; then
 	printf_fail "Not running"
 else
 	printf_ok "OK: pid=$PID ports=${PORTS:-N/A}"
 fi
 
-# Check Monasca Agent
-printf "Check Monasca Agent... "
-NAME=monasca-agent
-PID=$(ps -ef | fgrep python | awk '/'$NAME'/ {print $2}')
-if [ -z "$PID" ]; then
-	printf_fail "Not running"
+# Check Monasca API configuration
+printf "Check Monasca API configuration... "
+AUTH_USER=$(awk '
+	/adminUser/	{ print $2 }
+	' $MONASCA_API_CONF 2>/dev/null | tr -d \")
+AUTH_PASS=$(awk '
+	/adminPassword/	{ print $2 }
+	' $MONASCA_API_CONF 2>/dev/null | tr -d \")
+AUTH_URL=$(awk '
+	BEGIN		{ PROTOCOL="http" }
+	/Https: *True/	{ PROTOCOL="https" }
+	/serverVIP/	{ HOST=$2 }
+	/serverPort/	{ PORT=$2 }
+	END		{ if (HOST!="" && PORT!="")
+				printf "%s://%s:%d/v3", PROTOCOL, HOST, PORT;
+			}
+	' $MONASCA_API_CONF 2>/dev/null)
+if [ ! -r $MONASCA_API_CONF ]; then
+	printf_fail "Configuration file $MONASCA_API_CONF not found"
+elif [ -z "$AUTH_USER" ]; then
+	printf_fail "No 'adminUser' value found at $MONASCA_API_CONF"
+elif [ -z "$AUTH_PASS" ]; then
+	printf_fail "No 'adminPassword' value found at $MONASCA_API_CONF"
+elif [ -z "$AUTH_URL" ]; then
+	printf_fail "No 'serverVIP' or 'serverPort' found at $MONASCA_API_CONF"
 else
-	printf_ok "OK: pid=$PID"
+	printf_ok "$MONASCA_API_CONF"
 fi
 
-# Check Monasca Notification
-printf "Check Monasca Notification... "
+# Check Monasca Notification server
+printf "Check Monasca Notification server... "
 NAME=monasca-notification
 PID=$(ps -ef | fgrep python | awk '/'$NAME'/ {print $2}' | fmt)
 if [ -z "$PID" ]; then
@@ -279,8 +349,10 @@ LIB_VER=$(ps -f -C java \
 VERSION="${PID:+${LIB_VER:-N/A}}"
 if [ -z "$PID" ]; then
 	printf_fail "Not running"
+elif ! version_ge $VERSION $PERSISTER_MIN_VER; then
+	printf_fail "Found version $VERSION, but $PERSISTER_MIN_VER is required"
 elif [ -n "$MONGODB_HOST" -a "$VERSION" = "${VERSION%-FIWARE}" ]; then
-	printf_fail "Found $VERSION, but FIWARE specific version is required"
+	printf_fail "Not found required FIWARE-specific version"
 else
 	printf_ok "OK: pid=$PID version=$VERSION"
 fi
@@ -293,6 +365,120 @@ else
 	printf_ok "$PERSISTER_CONF"
 fi
 
+# Check Keystone credentials
+printf "Check Keystone credentials... "
+if get_keystone_token; then
+	printf_ok "OK"
+else
+	printf_fail "ERROR"
+fi
+
+# Check Monitoring API
+printf "Check Monitoring API... "
+SERVICE_CATALOG_MONITORING_URL=$(printf_service_url "monitoring")
+URL=${MONITORING_API:=$SERVICE_CATALOG_MONITORING_URL}
+if ! curl -s -S "$URL/monitoring/" 2>/dev/null | fgrep -q NOT_FOUND; then
+	printf_fail "Could not connect to Monitoring API at $URL"
+elif [ "$URL" != "$SERVICE_CATALOG_MONITORING_URL" ]; then
+	printf_ok "$URL"
+	printf_warn "* Catalog URL '$SERVICE_CATALOG_MONITORING_URL' differs"
+else
+	printf_ok "$URL"
+fi
+
+# Check Monitoring API region entities
+printf "Check Monitoring API region entities... "
+CURRENT_TIMESTAMP=$(date -u +%s)
+THRESHOLD_TIMESTAMP=$((CURRENT_TIMESTAMP - METRICS_VALIDITY_HOURS * 3600))
+UPGRADE_WARN=$(printf_warn " not upgraded to new monitoring" | tr -d '\n')
+QUERY=monitoring/regions
+REGIONS=$(curl -s -S $MONITORING_API/$QUERY 2>/dev/null \
+	| python -mjson.tool \
+	| awk -F'"' '/"id"/ {print $4}' | sort)
+if [ -z "$REGIONS" ]; then
+	printf_fail "Could not connect to Monitoring API at $MONITORING_API"
+else
+	printf_info "count=$(echo $REGIONS | wc -w)"
+	for REGION in $REGIONS; do
+		QUERY=monitoring/regions/$REGION
+		RESULT=$(curl -s -S $MONITORING_API/$QUERY)
+		IS_NEW_MONITORING=$(expr "$RESULT" : ".*\(components\).*")
+		MONITORING_API_DATE=$(echo "$RESULT" \
+			| sed 's/.*"timestamp":\( \)\?"\([^"]*\)".*/\2/g')
+
+		MONITORING_TIMESTAMP=$(date -u -d "$MONITORING_API_DATE" +%s)
+		DIFF_SECS=$((CURRENT_TIMESTAMP - MONITORING_TIMESTAMP))
+		DIFF_STR=$(date -d @$DIFF_SECS +'%j %H %M %S' | awk '
+			{ printf "%d days %dh %dm %ds\n", $1-1, $2, $3, $4 }')
+
+		if [ -n "$IS_NEW_MONITORING" ]; then
+			eval MONITORING_TIMESTAMP_$REGION=$MONITORING_TIMESTAMP
+			WARN=""
+		else
+			WARN="$UPGRADE_WARN"
+		fi
+
+		LINE="$REGION: timestamp=\"$MONITORING_API_DATE\""
+		if [ $MONITORING_TIMESTAMP -lt $THRESHOLD_TIMESTAMP ]; then
+			printf_fail "* ${LINE} (${DIFF_STR} outdated)${WARN}"
+		else
+			printf_ok "* ${LINE}${WARN}"
+		fi
+	done
+	MONITORING_REGIONS_REGEX=$(echo $REGIONS | sed 's/ /\\|/g')
+fi
+
+# Check ContextBroker region entities at MongoDB
+printf_skip_no_mongodb "Check ContextBroker regions... " && {
+MONGO_QUERY='{"_id.type": "region"}, {"attrs._timestamp.value":1, "modDate":1}'
+MONGO_RESULTS=$(mongo --quiet --eval "DBQuery.shellBatchSize=100; \
+	db.entities.find($MONGO_QUERY).shellPrint()" \
+	$MONGODB_HOST/orion 2>/dev/null)
+if [ -z "$(which mongo)" ]; then
+	printf_warn "Skipped: no 'mongo' client available"
+elif expr "$MONGO_RESULTS" : ".*Error.*" >/dev/null; then
+	printf_fail "Could not connect to Mongo database at $MONGODB_HOST"
+else
+	printf_info "count=$(echo "$MONGO_RESULTS" | wc -l)"
+	MONGO_TIMESTAMPS=$(echo "$MONGO_RESULTS" | awk -F'[ "]' '
+		{ print $12 ":" substr($44, 1, 10) ":" $(NF-1) }' | sort)
+	DATE_FMT="%d/%m/%Y %T %Z"
+	for ITEM in $MONGO_TIMESTAMPS; do
+		REGION=${ITEM%%:*}
+		REGION_ATTR_TIMESTAMP=$(echo $ITEM | cut -d: -f2)
+		LAST_UPDATE_TIMESTAMP=$(echo $ITEM | cut -d: -f3)
+		eval MONITORING_TIMESTAMP=\${MONITORING_TIMESTAMP_$REGION:-0}
+
+		DATE=$(date -d @$MONITORING_TIMESTAMP +"$DATE_FMT")
+		INFO="monitoring=$DATE"
+
+		DATE=$(date -d @$LAST_UPDATE_TIMESTAMP +"$DATE_FMT")
+		if [ $LAST_UPDATE_TIMESTAMP -eq $MONITORING_TIMESTAMP ]; then
+			INFO="$INFO modDate=$DATE"
+		else
+			WARN=$(printf_warn "modDate=$DATE" | tr -d '\n')
+			INFO="$INFO $WARN"
+		fi
+
+		DATE=$(date -d @$REGION_ATTR_TIMESTAMP +"$DATE_FMT")
+		if [ $REGION_ATTR_TIMESTAMP -eq $MONITORING_TIMESTAMP ]; then
+			INFO="$INFO _timestamp=$DATE"
+		else
+			WARN=$(printf_warn "_timestamp=$DATE" | tr -d '\n')
+			INFO="$INFO $WARN"
+		fi
+
+		if [ $(expr $REGION : "$MONITORING_REGIONS_REGEX") -eq 0 ]; then
+			printf_fail "* $REGION: not configured for monitoring"
+		elif [ $MONITORING_TIMESTAMP -eq 0 ]; then
+			printf_info "* $REGION: not upgraded to new monitoring"
+		else
+			printf_ok "* $REGION: $INFO"
+		fi
+	done
+fi
+}
+
 # Check ContextBroker version
 printf_skip_no_mongodb "Check ContextBroker version... " && {
 VERSION=$(curl -s -S -H "Accept: application/json" $BROKER_URL/version \
@@ -301,34 +487,6 @@ if ! version_ge $VERSION $BROKER_MIN_VER; then
 	printf_fail "Found version $VERSION, but $BROKER_MIN_VER is required"
 else
 	printf_ok "Version $VERSION at $BROKER_HOST"
-fi
-}
-
-# Check ContextBroker region entities at MongoDB
-printf_skip_no_mongodb "Check ContextBroker regions... " && {
-QUERY="{\"_id.type\": \"region\"}, {\"modDate\": 1}"
-REGIONS=$(mongo --quiet --eval "DBQuery.shellBatchSize=100; \
-	db.entities.find($QUERY).shellPrint()" $MONGODB_HOST/orion 2>/dev/null)
-UPDATE_TIMESTAMPS=$(echo "$REGIONS" | awk -F'[ "]' '{print $12 ":" $(NF-1)}')
-CURRENT_TIMESTAMP=$(date -u +%s)
-VALIDITY_THRESHOLD=$((CURRENT_TIMESTAMP - 3 * 3600))
-if [ -z "$(which mongo)" ]; then
-	printf_warn "Skipped: no 'mongo' client available"
-elif expr "$REGIONS" : ".*Error.*" >/dev/null; then
-	printf_fail "Could not connect to Mongo database at $MONGODB_HOST"
-else
-	printf_ok "$(echo "$REGIONS" | wc -l)"
-	for ITEM in $UPDATE_TIMESTAMPS; do
-		REGION=${ITEM%:*}
-		TIMESTAMP=${ITEM#*:}
-		DATE="last update $(date -d @$TIMESTAMP)"
-		DIFF=$((TIMESTAMP - VALIDITY_THRESHOLD))
-		if [ $DIFF -ge 0 ]; then
-			printf_info "* $REGION: $DATE"
-		else
-			printf_fail "* $REGION: $DATE ($DIFF seconds outdated)"
-		fi
-	done
 fi
 }
 
