@@ -214,14 +214,6 @@ send samples to Monasca:
    publisher/monclient.py
    ```
 
-   Additionally, please create a text file at `$PYTHON_SITE_PKG/ceilometer-2015.1.*.egg-info` to record the exact
-   version of Ceilosca being manually installed. For instance, when installing version "2015.1-FIWARE-5.3.3":
-
-   ```
-   # VERSION=2015.1-FIWARE-5.3.3
-   # (cd $PYTHON_SITE_PKG/ceilometer-2015.1.*.egg-info; echo version=$VERSION > ceilosca.txt)
-   ```
-
 3. Edit the entry points file to add the following entries:
 
    At `[ceilometer.publisher]` section:

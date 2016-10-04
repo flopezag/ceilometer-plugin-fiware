@@ -313,7 +313,7 @@ METADATA_FOR_REGIONS="\
 # Required versions for components
 REQ_VERSION_PYTHON=2.7
 REQ_VERSION_AGENT=1.1.21-FIWARE
-REQ_VERSION_CEILOSCA=2015.1-FIWARE-5.3.3
+REQ_VERSION_CEILOSCA=2015.1.2
 REQ_VERSION_CEILOMETER=2015.1.1
 REQ_VERSION_POLLSTER_HOST=1.0.1
 REQ_VERSION_POLLSTER_REGION=1.0.3
@@ -499,11 +499,11 @@ fi
 
 # Check Ceilometer plugin for Monasca (Ceilosca)
 printf "Check Ceilometer plugin for Monasca (Ceilosca)... "
-FILE=$PYTHON_SITE_PKG/ceilometer-*.egg-info/ceilosca.txt
-CUR_VERSION=$(awk -F= '{print $2}' $FILE 2>/dev/null)
+CUR_VERSION=$(python -c "from ceilometer.monasca_client import Client; \
+		print getattr(Client, 'version', '2015.1')" 2>/dev/null)
 REQ_VERSION=$REQ_VERSION_CEILOSCA
 if [ -z "$CUR_VERSION" ]; then
-	printf_warn "Could not find version (please check installation details)"
+	printf_fail "Not found (please check installation details)"
 elif ! check_version "$CUR_VERSION" "$REQ_VERSION"; then
 	printf_fail "$CUR_VERSION found: $REQ_VERSION required"
 else
